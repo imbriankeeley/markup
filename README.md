@@ -28,7 +28,6 @@ This guide details how to secure your Google Cloud instance by disabling public 
    sudo apt update
 Install Tailscale:
 ```bash
-Copy
 curl -fsSL https://tailscale.com/install.sh | sh
 ```
 b. Authenticate and Connect to Your Tailscale Network
@@ -36,23 +35,22 @@ Bring Up Tailscale:
 Replace <YOUR_AUTH_KEY> with your Tailscale authentication key and choose a hostname (e.g., erp-prod-vm):
 
 ```bash
-Copy
 sudo tailscale up --authkey=<YOUR_AUTH_KEY> --hostname erp-prod-vm
 ```
 Verify the Connection:
 Check the Tailscale-assigned IP address:
 
-bash
-Copy
+```bash
 tailscale ip -4
+```
 You should see an IP in the Tailscale range (e.g., 100.x.x.x).
 
 Test SSH via Tailscale:
 From another Tailscale-connected device, run:
 
-bash
-Copy
+```bash
 ssh <tailscale-ip> -l <your-username>
+```
 Confirm that you can access the instance through its Tailscale IP.
 
 3. Disable Public SSH Access
@@ -68,8 +66,7 @@ Source IP Ranges: Use the Tailscale subnet (typically 100.64.0.0/10) or specific
 Protocols/Ports: TCP port 22.
 Example using the gcloud CLI:
 
-bash
-Copy
+```bash
 gcloud compute firewall-rules create allow-ssh-tailscale \
   --direction=INGRESS \
   --priority=1000 \
@@ -78,6 +75,7 @@ gcloud compute firewall-rules create allow-ssh-tailscale \
   --rules=tcp:22 \
   --source-ranges=100.64.0.0/10 \
   --target-tags=erp-prod
+```
 Block Public SSH Access:
 
 Remove or disable any firewall rules that allow SSH (port 22) from 0.0.0.0/0.
@@ -85,9 +83,9 @@ Ensure that only the Tailscale-specific rule is active.
 b. (Optional) Bind SSH Only to the Tailscale Interface
 Edit the SSH Configuration:
 
-bash
-Copy
+```bash
 sudo nano /etc/ssh/sshd_config
+```
 Set the ListenAddress:
 Add a line with your Tailscale IP (from the tailscale ip -4 output):
 
@@ -98,34 +96,34 @@ Comment out or remove other ListenAddress entries.
 
 Restart SSH:
 
-bash
-Copy
+```bash
 sudo systemctl restart sshd
+```
 4. Ensure Dokploy Can Access the Root Directory
 Dokploy must be able to manage system tasks (like updating files and restarting Docker) even though public SSH is disabled.
 
 a. Install and Configure the Dokploy Agent Locally
 Install the Dokploy Agent:
 Follow Dokploy’s installation documentation. For example:
-bash
-Copy
+```bash
 curl -O https://dokploy.com/agent/install.sh
 sudo bash install.sh
+```
 Configure the Agent:
 Edit the agent configuration file (commonly found at /etc/dokploy/agent.conf).
 Ensure it runs with root-level privileges (or via sudo).
 Confirm it is set to access the Docker socket. For example:
-bash
-Copy
+```bash
 DOCKER_SOCKET=/var/run/docker.sock
+```
 Set Up the Agent as a Systemd Service:
 Create a systemd unit file (if one is not already provided):
-bash
-Copy
+```bash
 sudo nano /etc/systemd/system/dokploy-agent.service
+```
 Insert the following:
+```
 ini
-Copy
 [Unit]
 Description=Dokploy Agent Service
 After=docker.service
@@ -149,6 +147,7 @@ Check logs to ensure the agent is running correctly:
 bash
 Copy
 sudo journalctl -u dokploy-agent -f
+```
 b. Alternatively, Use Dokploy’s Local CLI
 If you’re not using a dedicated agent, ensure that any Dokploy CLI commands are executed locally on the VM with the necessary root privileges (using sudo where required). The CLI should access Docker through /var/run/docker.sock.
 
@@ -156,9 +155,9 @@ If you’re not using a dedicated agent, ensure that any Dokploy CLI commands ar
 a. Test Tailscale SSH Access
 From a Tailscale-connected Device:
 Try connecting using:
-bash
-Copy
+```bash
 ssh <tailscale-ip> -l <your-username>
+```
 Confirm access.
 b. Confirm Public SSH is Blocked
 From Outside Tailscale:
