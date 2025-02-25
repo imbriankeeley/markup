@@ -27,16 +27,18 @@ This guide details how to secure your Google Cloud instance by disabling public 
    ```bash
    sudo apt update
 Install Tailscale:
-bash
+```bash
 Copy
 curl -fsSL https://tailscale.com/install.sh | sh
+```
 b. Authenticate and Connect to Your Tailscale Network
 Bring Up Tailscale:
 Replace <YOUR_AUTH_KEY> with your Tailscale authentication key and choose a hostname (e.g., erp-prod-vm):
 
-bash
+```bash
 Copy
 sudo tailscale up --authkey=<YOUR_AUTH_KEY> --hostname erp-prod-vm
+```
 Verify the Connection:
 Check the Tailscale-assigned IP address:
 
