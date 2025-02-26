@@ -219,9 +219,15 @@ This setup integrates Tailscale as a sidecar for both Dokploy and Frappe, prov
 
 
 
+```
+docker exec -it <container> sh
+tailscale up --ssh --accept-dns=true
+```
 
 
 
+
+```
 
 x-custom-image: &custom_image
   image: ${IMAGE_NAME:-docker.io/frappe/erpnext}:${VERSION:-version-15}
@@ -599,3 +605,5 @@ networks:
   tailscale_network:
     external: true
     name: tailscale
+
+```
