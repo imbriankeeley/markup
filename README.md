@@ -1,190 +1,218 @@
-# Tailscale + Dokploy Secure Deployment Guide
 
-This guide details how to secure your Google Cloud instance by disabling public SSH access, using Tailscale for all SSH connections, and ensuring that Dokploy can still access the root directory to manage deployments.
+```markdown
+
+### **Step 1: Create a Google Cloud VM**
+1. **Log in to Google Cloud Console**:
+   - Navigate to **Compute Engine > VM Instances**.
+   - Click **Create Instance**.
+
+2. **Configure the VM**:
+   - Choose an **e2-medium** (2 vCPUs, 4 GB RAM) for lightweight deployments or **e2-standard-2** (2 vCPUs, 8 GB RAM) for more capacity.
+   - Select your preferred region and zone.
+   - Under **Boot disk**, choose Ubuntu 22.04 LTS.
+   - Set the disk size to at least **50 GB SSD**.
+
+3. **Enable IP Forwarding**:
+   - Under **Management, security, disks, networking, sole tenancy**, go to the **Networking** tab.
+   - Set **IP Forwarding** to **On** (required for Tailscale subnet routing).
+
+4. **Firewall Rules**:
+   - Allow UDP port 41641 for Tailscale:
+     - Go to **VPC Network > Firewall Rules**, and create two ingress rules:
+       - Allow `0.0.0.0/0` for UDP port 41641.
+       - Allow `::/0` for UDP port 41641.
+
+5. Click **Create** to launch the VM.
 
 ---
 
-## 1. Prerequisites
-
-- **Google Cloud Instance:**  
-  - Ubuntu 24.04 (or similar) with Docker, Docker Compose, and Dokploy already installed.
-- **Tailscale Account:**  
-  - An active Tailscale account with an authentication key.
-- **Dokploy Setup:**  
-  - Dokploy Cloud or a local Dokploy agent ready for deployment tasks.
-- **Access:**  
-  - Root privileges on your instance (via `sudo`).
-- **Familiarity With:**  
-  - Basic Linux commands, Google Cloud Console (for firewall rules), and editing configuration files.
-
----
-
-## 2. Install and Configure Tailscale for SSH Access
-
-### a. Install Tailscale
-
-1. **Update Your Package Index:**
+### **Step 2: Install Docker**
+6. SSH into your VM:
    ```bash
-   sudo apt update
-Install Tailscale:
+   gcloud compute ssh <vm-name>
+   ```
+
+7. Install Docker:
+   ```bash
+   curl -fsSL https://get.docker.com -o install-docker.sh
+   sudo sh install-docker.sh
+   ```
+
+8. Add your user to the Docker group (optional):
+   ```bash
+   sudo usermod -aG docker $USER
+   ```
+   Log out and back in for this to take effect.
+
+9. Verify Docker installation:
+   ```bash
+   docker run --rm hello-world
+   ```
+
+---
+
+### **Step 3: Install Tailscale**
+10. Run Tailscale as a Docker container:
+   Create a `docker-compose.yml` file:
+   ```yaml
+   version: "3.9"
+   services:
+     tailscale:
+       image: tailscale/tailscale:latest
+       container_name: tailscaled
+       cap_add:
+         - NET_ADMIN
+         - NET_RAW
+       environment:
+         TS_AUTHKEY: "<your-auth-key>" # Replace with your Tailscale auth key
+       volumes:
+         - tailscale_data:/var/lib/tailscale
+         - /dev/net/tun:/dev/net/tun
+       network_mode: host
+       restart: unless-stopped
+
+   volumes:
+     tailscale_data:
+   ```
+
+11. Start Tailscale:
+   ```bash
+   docker compose up -d
+   ```
+
+12. Authenticate Tailscale:
+   Check the container logs for an authentication link:
+   ```bash
+   docker logs tailscaled
+   ```
+   Open the link in your browser and log in to your Tailscale account.
+
+13. Advertise subnet routes (optional):
+   ```bash
+   docker exec tailscaled tailscale up --advertise-routes=10.x.x.x/24 --accept-dns=false
+   ```
+
+---
+
+### **Step 4: Install Dokploy**
+14. Install Dokploy using its installation script:
+   ```bash
+   curl -sSL https://dokploy.com/install.sh | sh
+   ```
+
+15. Dokploy will automatically set up its Docker containers and expose ports 80 (HTTP) and 443 (HTTPS).
+
+---
+
+### **Step 5: Combine Tailscale and Dokploy**
+Modify Dokploy’s `docker-compose.yml` file (usually found in `/var/lib/dokploy/docker-compose.yml`) to include Tailscale as a service:
+
+```yaml
+version: "3.9"
+
+services:
+  dokploy:
+    image: dokploy/dokploy:latest
+    container_name: dokploy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - dokploy_data:/data
+    restart: unless-stopped
+
+  tailscale:
+    image: tailscale/tailscale:latest
+    container_name: tailscaled
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    environment:
+      TS_AUTHKEY: "<your-auth-key>"
+    volumes:
+      - tailscale_data:/var/lib/tailscale
+      - /dev/net/tun:/dev/net/tun
+    network_mode: host
+    restart: unless-stopped
+
+volumes:
+  dokploy_data:
+  tailscale_data:
+```
+
+Restart both services with Docker Compose:
 ```bash
-curl -fsSL https://tailscale.com/install.sh | sh
+docker compose up -d
 ```
-b. Authenticate and Connect to Your Tailscale Network
-Bring Up Tailscale:
-Replace <YOUR_AUTH_KEY> with your Tailscale authentication key and choose a hostname (e.g., erp-prod-vm):
 
-```bash
-sudo tailscale up --authkey=<YOUR_AUTH_KEY> --hostname erp-prod-vm
+---
+
+```yaml
+version: "3.9"
+
+services:
+  dokploy:
+    image: dokploy/dokploy:latest
+    container_name: dokploy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - dokploy_data:/data
+    restart: unless-stopped
+
+  frappe:
+    image: frappe/frappe:latest
+    container_name: frappe
+    depends_on:
+      - tailscale
+    network_mode: service:tailscale
+    environment:
+      - FRAPPE_SITE_NAME=your_site_name
+    volumes:
+      - frappe_sites:/home/frappe/frappe-bench/sites
+
+  tailscale:
+    image: tailscale/tailscale:latest
+    container_name: tailscaled
+    hostname: frappe-dokploy
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    environment:
+      - TS_AUTHKEY=<your-tailscale-auth-key>
+      - TS_EXTRA_ARGS=--advertise-tags=tag:containers
+      - TS_STATE_DIR=/var/lib/tailscale
+    volumes:
+      - tailscale_data:/var/lib/tailscale
+      - /dev/net/tun:/dev/net/tun
+    network_mode: host
+    restart: unless-stopped
+
+volumes:
+  dokploy_data:
+  frappe_sites:
+  tailscale_data:
 ```
-Verify the Connection:
-Check the Tailscale-assigned IP address:
 
-```bash
-tailscale ip -4
-```
-You should see an IP in the Tailscale range (e.g., 100.x.x.x).
+To deploy this setup:
 
-Test SSH via Tailscale:
-From another Tailscale-connected device, run:
+1. Replace `<your-tailscale-auth-key>` with your actual Tailscale auth key.
 
-```bash
-ssh <tailscale-ip> -l <your-username>
-```
-Confirm that you can access the instance through its Tailscale IP.
+2. Save the file as `docker-compose.yml` in your project directory.
 
-3. Disable Public SSH Access
-a. Update Google Cloud Firewall Rules
-Open Google Cloud Console:
-Navigate to VPC network > Firewall rules.
+3. Run the following command to start the services:
+   ```
+   docker compose up -d
+   ```
 
-Create (or Update) a Firewall Rule to Allow SSH Only from Tailscale:
+4. Monitor the Tailscale container logs to ensure it connects successfully:
+   ```
+   docker logs tailscaled
+   ```
 
-Name: allow-ssh-tailscale
-Targets: Your VM instance (or a specific network tag like erp-prod).
-Source IP Ranges: Use the Tailscale subnet (typically 100.64.0.0/10) or specific Tailscale IPs.
-Protocols/Ports: TCP port 22.
-Example using the gcloud CLI:
+5. Once Tailscale is connected, you can access your Frappe instance via its Tailscale IP or MagicDNS hostname.
 
-```bash
-gcloud compute firewall-rules create allow-ssh-tailscale \
-  --direction=INGRESS \
-  --priority=1000 \
-  --network=default \
-  --action=ALLOW \
-  --rules=tcp:22 \
-  --source-ranges=100.64.0.0/10 \
-  --target-tags=erp-prod
-```
-Block Public SSH Access:
+6. Use Dokploy's web interface to manage your Frappe deployment.
 
-Remove or disable any firewall rules that allow SSH (port 22) from 0.0.0.0/0.
-Ensure that only the Tailscale-specific rule is active.
-b. (Optional) Bind SSH Only to the Tailscale Interface
-Edit the SSH Configuration:
-
-```bash
-sudo nano /etc/ssh/sshd_config
-```
-Set the ListenAddress:
-Add a line with your Tailscale IP (from the tailscale ip -4 output):
-
-plaintext
-Copy
-ListenAddress 100.x.x.x
-Comment out or remove other ListenAddress entries.
-
-Restart SSH:
-
-```bash
-sudo systemctl restart sshd
-```
-4. Ensure Dokploy Can Access the Root Directory
-Dokploy must be able to manage system tasks (like updating files and restarting Docker) even though public SSH is disabled.
-
-a. Install and Configure the Dokploy Agent Locally
-Install the Dokploy Agent:
-Follow Dokploy’s installation documentation. For example:
-```bash
-curl -O https://dokploy.com/agent/install.sh
-sudo bash install.sh
-```
-Configure the Agent:
-Edit the agent configuration file (commonly found at /etc/dokploy/agent.conf).
-Ensure it runs with root-level privileges (or via sudo).
-Confirm it is set to access the Docker socket. For example:
-```bash
-DOCKER_SOCKET=/var/run/docker.sock
-```
-Set Up the Agent as a Systemd Service:
-Create a systemd unit file (if one is not already provided):
-```bash
-sudo nano /etc/systemd/system/dokploy-agent.service
-```
-Insert the following:
-```
-ini
-[Unit]
-Description=Dokploy Agent Service
-After=docker.service
-
-[Service]
-ExecStart=/usr/local/bin/dokploy-agent --config /etc/dokploy/agent.conf
-Restart=always
-User=root
-Environment=DOCKER_SOCKET=/var/run/docker.sock
-
-[Install]
-WantedBy=multi-user.target
-Reload systemd and start the service:
-bash
-Copy
-sudo systemctl daemon-reload
-sudo systemctl enable dokploy-agent
-sudo systemctl start dokploy-agent
-Verify the Agent:
-Check logs to ensure the agent is running correctly:
-bash
-Copy
-sudo journalctl -u dokploy-agent -f
-```
-b. Alternatively, Use Dokploy’s Local CLI
-If you’re not using a dedicated agent, ensure that any Dokploy CLI commands are executed locally on the VM with the necessary root privileges (using sudo where required). The CLI should access Docker through /var/run/docker.sock.
-
-5. Validate the Complete Setup
-a. Test Tailscale SSH Access
-From a Tailscale-connected Device:
-Try connecting using:
-```bash
-ssh <tailscale-ip> -l <your-username>
-```
-Confirm access.
-b. Confirm Public SSH is Blocked
-From Outside Tailscale:
-Attempt to SSH to the VM’s public IP. The connection should fail.
-c. Verify Dokploy Operations
-Trigger a Deployment:
-Use the Dokploy Cloud GUI or CLI to trigger a deployment.
-Monitor Logs:
-Check that the Dokploy agent can access the root directory, manage Docker, and perform system tasks as expected.
-d. Confirm Outbound Connectivity
-Firewall Check:
-Ensure that while inbound SSH is restricted, the instance can still make outbound connections required by Dokploy to communicate with its cloud service.
-6. Additional Security Considerations
-Keep Software Updated:
-Regularly update Tailscale, Dokploy, and system packages.
-Monitor Logs:
-Use Google Cloud Operations Suite or another logging solution to monitor for access attempts and system events.
-Plan for Backup Access:
-Consider setting up an alternative secure management channel in case Tailscale experiences issues.
-Conclusion
-By following this guide, you will:
-
-Secure SSH Access:
-Disable public SSH and restrict access to only those devices connected via Tailscale.
-Enable Secure Management:
-Allow Dokploy to manage your system with root-level access through a locally running agent.
-Enhance Security:
-Leverage Google Cloud firewall rules and local configurations to provide a layered security approach.
-Save this file for future reference and modify it as needed for your specific environment. Happy deploying!
-
+This setup integrates Tailscale as a sidecar for both Dokploy and Frappe, prov
