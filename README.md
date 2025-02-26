@@ -1,6 +1,4 @@
 
-```markdown
-
 ### **Step 1: Create a Google Cloud VM**
 1. **Log in to Google Cloud Console**:
    - Navigate to **Compute Engine > VM Instances**.
